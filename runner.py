@@ -3,17 +3,34 @@
 import argparse
 import logging
 import pathlib
+import time
 import sys
+import os
 
 import trunner.config as config
 
 from trunner.test_runner import TestsRunner
 from trunner.tools.color import Color
 
+SEC_TO_SLEEP = 45
+NUM_RETRIES = 10
+
+def check_processes():
+    pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
+    counter = 0
+    for pid in pids:
+        try:
+            proc_cmd = open(os.path.join('/proc', pid, 'cmdline')).read()
+            if "/phoenix-rtos-tests/runner.py" in proc_cmd:
+                counter += 1
+        except IOError: # proc has already terminated
+            continue
+    return counter
+
 
 def set_logger(level=logging.INFO):
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
+    root.setLevel(level)
 
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(level)
@@ -101,14 +118,30 @@ def parse_args():
 def main():
     args = parse_args()
     set_logger(args.log_level)
-
+    
+    for i in range(NUM_RETRIES):
+        num_proc = check_processes()
+        if num_proc == 1:
+            break
+        elif num_proc == 2:
+            if i == 0:
+                print("Another instance of runner is already running")
+            print(f"Waiting:{SEC_TO_SLEEP}s {i+1}/{NUM_RETRIES}")
+            time.sleep(SEC_TO_SLEEP)
+        else:
+            print("Queue is full ;)")
+            sys.exit(1)
+    else:
+        print(f"\twaited {int((NUM_RETRIES)*SEC_TO_SLEEP/60)} min.")
+        sys.exit(1)
+        
     runner = TestsRunner(targets=args.target,
-                         test_paths=args.test,
-                         build=args.build,
-                         flash=not args.no_flash,
-                         serial=(args.serial, args.baudrate),
-                         log=(args.log_level == logging.DEBUG)
-                         )
+                        test_paths=args.test,
+                        build=args.build,
+                        flash=not args.no_flash,
+                        serial=(args.serial, args.baudrate),
+                        log=(args.log_level == logging.DEBUG)
+                        )
 
     passed, failed, skipped = runner.run()
 
